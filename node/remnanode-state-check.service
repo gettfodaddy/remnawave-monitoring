@@ -1,0 +1,8 @@
+[Unit]
+Description=Collect Remnawave Node container state for Prometheus
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/collect-remnanode-state

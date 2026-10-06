@@ -1,0 +1,45 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: telegram
+  group_by: [alertname, node]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - alertname="VPNNodeNeedsHeal"
+      receiver: telegram-and-healer
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      - bot_token_file: /run/secrets/telegram_bot_token
+        chat_id: -1001234567890
+        send_resolved: true
+        parse_mode: HTML
+        message: |
+          {{ if eq .Status "firing" }}🔴{{ else }}🟢{{ end }} <b>{{ .CommonLabels.alertname }}</b>
+          Узел: <code>{{ .CommonLabels.node }}</code>
+          {{ range .Alerts }}{{ .Annotations.summary }}
+          {{ .Annotations.description }}
+          {{ end }}
+
+  - name: telegram-and-healer
+    telegram_configs:
+      - bot_token_file: /run/secrets/telegram_bot_token
+        chat_id: -1001234567890
+        send_resolved: true
+        parse_mode: HTML
+        message: |
+          {{ if eq .Status "firing" }}🛠️ <b>Автохил запрошен</b>{{ else }}✅ <b>Инцидент закрыт</b>{{ end }}
+          Узел: <code>{{ .CommonLabels.node }}</code>
+          {{ range .Alerts }}{{ .Annotations.summary }}
+          {{ .Annotations.description }}
+          {{ end }}
+    webhook_configs:
+      - url: http://healer:8080/alertmanager
+        send_resolved: true
+        http_config:
+          bearer_token_file: /run/secrets/healer_bearer_token

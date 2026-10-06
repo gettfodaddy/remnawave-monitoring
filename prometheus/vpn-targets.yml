@@ -1,0 +1,15 @@
+# Use the real public IP and VPN inbound port for each node.
+- targets: ["203.0.113.10:443"]
+  labels:
+    node: "de-01"
+    role: "vpn-node"
+
+- targets: ["203.0.113.11:443"]
+  labels:
+    node: "nl-01"
+    role: "vpn-node"
+
+- targets: ["203.0.113.12:443"]
+  labels:
+    node: "fr-01"
+    role: "vpn-node"

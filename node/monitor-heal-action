@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+logger -t monitor-heal "restarting only remnanode container"
+exec /usr/bin/docker restart remnanode

@@ -1,0 +1,153 @@
+name: remnawave-monitoring
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    container_name: monitoring-prometheus
+    user: "65534:65534"
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/targets.yml:/etc/prometheus/targets.yml:ro
+      - ./prometheus/vpn-targets.yml:/etc/prometheus/vpn-targets.yml:ro
+      - ./prometheus/panel-targets.yml:/etc/prometheus/panel-targets.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - ./secrets/remnawave_metrics_password:/run/secrets/remnawave_metrics_password:ro
+      - prometheus-data:/prometheus
+    networks: [monitoring]
+    expose: ["9090"]
+    ports: ["127.0.0.1:9090:9090"]
+
+  alertmanager:
+    image: prom/alertmanager:v0.34.1
+    container_name: monitoring-alertmanager
+    user: "0:0"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./secrets:/run/secrets:ro
+      - alertmanager-data:/alertmanager
+    networks: [monitoring]
+    expose: ["9093"]
+    ports: ["127.0.0.1:9093:9093"]
+    depends_on: [prometheus, healer]
+
+  grafana:
+    image: grafana/grafana:13.2.2
+    container_name: monitoring-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:?set GRAFANA_ADMIN_USER in .env}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_AUTH_BASIC_ENABLED: "true"
+      GF_SERVER_DOMAIN: ${GRAFANA_DOMAIN:?set GRAFANA_DOMAIN in .env}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:?set GRAFANA_ROOT_URL in .env}
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks: [monitoring]
+    depends_on: [prometheus]
+
+  caddy:
+    image: caddy:2.11.7
+    container_name: monitoring-caddy
+    restart: unless-stopped
+    environment:
+      GRAFANA_DOMAIN: ${GRAFANA_DOMAIN:?set GRAFANA_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [monitoring]
+    depends_on: [grafana]
+
+  blackbox:
+    image: quay.io/prometheus/blackbox-exporter:v0.28.0
+    container_name: monitoring-blackbox
+    restart: unless-stopped
+    command: ["--config.file=/etc/blackbox/blackbox.yml"]
+    volumes:
+      - ./blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    networks: [monitoring]
+    expose: ["9115"]
+
+  healer:
+    build: ./healer
+    container_name: monitoring-healer
+    user: "0:0"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    restart: unless-stopped
+    environment:
+      PROMETHEUS_URL: http://prometheus:9090
+      NODES_FILE: /etc/healer/nodes.json
+      SSH_KEY: /run/secrets/healer_ssh_key
+      SSH_KNOWN_HOSTS: /etc/healer/known_hosts
+      STATE_DB: /var/lib/healer/state.sqlite3
+      BEARER_TOKEN_FILE: /run/secrets/healer_bearer_token
+      TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:?set TELEGRAM_CHAT_ID in .env}
+      COOLDOWN_SECONDS: "900"
+      DRY_RUN: ${HEALER_DRY_RUN:-true}
+    volumes:
+      - ./healer/nodes.json:/etc/healer/nodes.json:ro
+      - ./healer/known_hosts:/etc/healer/known_hosts:ro
+      - ./secrets:/run/secrets:ro
+      - healer-state:/var/lib/healer
+    networks: [monitoring]
+    expose: ["8080"]
+
+  digest:
+    build: ./digest
+    container_name: monitoring-digest
+    restart: unless-stopped
+    user: "0:0"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    environment:
+      PROMETHEUS_URL: http://prometheus:9090
+      TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:?set TELEGRAM_CHAT_ID in .env}
+      TIMEZONE: Europe/Moscow
+      REPORT_HOUR: "9"
+      REPORT_MINUTE: "0"
+    volumes:
+      - ./secrets:/run/secrets:ro
+    networks: [monitoring]
+    depends_on: [prometheus]
+
+networks:
+  monitoring:
+    name: remnawave-monitoring
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:
+  healer-state:
+  caddy-data:
+  caddy-config:

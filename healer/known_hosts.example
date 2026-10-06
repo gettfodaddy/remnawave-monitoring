@@ -1,0 +1,5 @@
+# Fill with pinned host keys for every node. Generate entries from a trusted
+# source using ssh-keyscan, then independently verify fingerprints with your
+# VPS console/provider. Do not trust an unverified ssh-keyscan result alone.
+# Example format:
+# 203.0.113.10 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA...

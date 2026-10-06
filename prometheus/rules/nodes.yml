@@ -1,0 +1,96 @@
+groups:
+  - name: node-health
+    rules:
+      - alert: NodeExporterDown
+        expr: up{job="node", role="vpn-node"} == 0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Node Exporter недоступен на {{ $labels.node }}"
+          description: "Prometheus не получает системные метрики от {{ $labels.instance }} более 3 минут. Автохил не запускается."
+
+      - alert: NodeHighCPU
+        expr: 100 * (1 - avg by (node) (rate(node_cpu_seconds_total{job="node", mode="idle"}[5m]))) > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Высокая загрузка CPU: {{ $labels.node }}"
+          description: "CPU выше 90% более 10 минут. Текущее значение: {{ $value | printf \"%.1f\" }}%."
+
+      - alert: NodeLowMemory
+        expr: 100 * node_memory_MemAvailable_bytes{job="node"} / node_memory_MemTotal_bytes{job="node"} < 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Мало доступной памяти: {{ $labels.node }}"
+          description: "Доступно менее 10% RAM. Остаток: {{ $value | printf \"%.1f\" }}%."
+
+      - alert: NodeLowDiskSpace
+        expr: 100 * node_filesystem_avail_bytes{job="node", fstype!~"tmpfs|overlay|squashfs|ramfs|devtmpfs"} / node_filesystem_size_bytes{job="node", fstype!~"tmpfs|overlay|squashfs|ramfs|devtmpfs"} < 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Мало места на диске: {{ $labels.node }} {{ $labels.mountpoint }}"
+          description: "Свободно менее 10% на файловой системе {{ $labels.mountpoint }}."
+
+      - alert: RemnawaveContainerStopped
+        expr: remnawave_container_up{role="vpn-node"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Контейнер Remnawave Node остановлен: {{ $labels.node }}"
+          description: "Контейнер remnanode не работает. Docker restart policy должна попытаться поднять его. Автохилер не запускается."
+
+      - alert: RemnawaveStateCheckStale
+        expr: time() - remnawave_container_check_timestamp_seconds{role="vpn-node"} > 90
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Устарела проверка remnanode: {{ $labels.node }}"
+          description: "Скрипт сбора состояния контейнера не обновлял метрику более 90 секунд."
+
+      - alert: VPNPortUnreachable
+        expr: probe_success{job="vpn_tcp", role="vpn-node"} == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "VPN-порт недоступен: {{ $labels.node }}"
+          description: "Внешняя TCP-проверка {{ $labels.instance }} не проходит 3 минуты."
+
+      # Only this alert is eligible for automated healing. It requires an
+      # external port failure plus live exporter and a running remnanode
+      # container with a fresh local state check.
+      - alert: VPNNodeNeedsHeal
+        expr: (probe_success{job="vpn_tcp", role="vpn-node"} == 0) and on (node) (up{job="node", role="vpn-node"} == 1) and on (node) (remnawave_container_up{role="vpn-node"} == 1) and on (node) (time() - remnawave_container_check_timestamp_seconds{role="vpn-node"} < 90)
+        for: 3m
+        labels:
+          severity: critical
+          autoheal: "true"
+        annotations:
+          summary: "Проверка автохила: {{ $labels.node }}"
+          description: "VPN-порт не отвечает, но exporter доступен и remnanode работает. Executor повторно проверит условия и при подтверждении перезапустит только контейнер remnanode."
+
+      - alert: RemnawavePanelMetricsDown
+        expr: up{job="remnawave", app="remnawave"} == 0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Metrics endpoint панели Remnawave недоступен"
+          description: "Prometheus не может получить метрики панели. Проверьте маршрут, firewall и METRICS_USER/METRICS_PASS."
+
+      - alert: RemnawaveNodeDisconnected
+        expr: remnawave_node_status{app="remnawave"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Панель Remnawave потеряла связь с нодой {{ $labels.node_uuid }}"
+          description: "Статус ноды в метриках панели равен disconnected более 2 минут. Автохил не запускается по одному этому сигналу."
