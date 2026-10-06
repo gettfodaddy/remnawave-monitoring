@@ -20,10 +20,13 @@ receivers:
         send_resolved: true
         parse_mode: HTML
         message: |
-          {{ if eq .Status "firing" }}🔴{{ else }}🟢{{ end }} <b>{{ .CommonLabels.alertname }}</b>
-          Узел: <code>{{ .CommonLabels.node }}</code>
-          {{ range .Alerts }}{{ .Annotations.summary }}
-          {{ .Annotations.description }}
+          {{ range .Alerts }}
+          {{ if eq .Status "firing" }}🔴 <b>ТРЕБУЕТ ВНИМАНИЯ</b>{{ else }}✅ <b>ВОССТАНОВЛЕНО</b>{{ end }}
+          {{ if eq .Labels.alertname "VPNPortUnreachable" }}<b>VPN-порт недоступен</b>{{ else if eq .Labels.alertname "NodeExporterDown" }}<b>Сбор метрик ноды остановлен</b>{{ else if eq .Labels.alertname "NodeHighCPU" }}<b>Высокая загрузка CPU</b>{{ else if eq .Labels.alertname "NodeLowMemory" }}<b>Заканчивается RAM</b>{{ else if eq .Labels.alertname "NodeLowDiskSpace" }}<b>Заканчивается место на диске</b>{{ else if eq .Labels.alertname "RemnawaveContainerStopped" }}<b>Контейнер Remnawave остановлен</b>{{ else if eq .Labels.alertname "RemnawaveStateCheckStale" }}<b>Устарела проверка контейнера</b>{{ else if eq .Labels.alertname "RemnawavePanelMetricsDown" }}<b>Метрики панели недоступны</b>{{ else if eq .Labels.alertname "RemnawaveNodeDisconnected" }}<b>Нода отключена от панели</b>{{ else }}<b>{{ .Labels.alertname }}</b>{{ end }}
+          🖥 Нода: <code>{{ if .Labels.node }}{{ .Labels.node }}{{ else }}не указана{{ end }}</code>
+          {{ if .Labels.instance }}🔌 Адрес: <code>{{ .Labels.instance }}</code>
+          {{ end }}{{ if .Annotations.description }}📝 {{ .Annotations.description }}
+          {{ end }}⏱ Начало: <code>{{ .StartsAt.Format "02.01 15:04:05" }}</code>
           {{ end }}
 
   - name: telegram-and-healer
@@ -33,10 +36,12 @@ receivers:
         send_resolved: true
         parse_mode: HTML
         message: |
-          {{ if eq .Status "firing" }}🛠️ <b>Автохил запрошен</b>{{ else }}✅ <b>Инцидент закрыт</b>{{ end }}
-          Узел: <code>{{ .CommonLabels.node }}</code>
-          {{ range .Alerts }}{{ .Annotations.summary }}
-          {{ .Annotations.description }}
+          {{ range .Alerts }}
+          {{ if eq .Status "firing" }}🛠️ <b>АВТОХИЛ: СИГНАЛ ПОЛУЧЕН</b>{{ else }}✅ <b>АВТОХИЛ: ИНЦИДЕНТ ЗАКРЫТ</b>{{ end }}
+          🖥 Нода: <code>{{ .Labels.node }}</code>
+          {{ if .Labels.instance }}🔌 Адрес: <code>{{ .Labels.instance }}</code>
+          {{ end }}{{ if .Annotations.description }}📝 {{ .Annotations.description }}
+          {{ end }}⏱ Начало: <code>{{ .StartsAt.Format "02.01 15:04:05" }}</code>
           {{ end }}
     webhook_configs:
       - url: http://healer:8080/alertmanager

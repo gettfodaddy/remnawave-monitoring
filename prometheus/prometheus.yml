@@ -36,13 +36,12 @@ scrape_configs:
       - target_label: __address__
         replacement: blackbox:9115
 
-  # Remnawave Panel's built-in authenticated Prometheus endpoint. Set the
-  # panel metrics listener to a private/WireGuard-reachable address only.
+  # Remnawave Panel's built-in authenticated Prometheus endpoint.
   - job_name: remnawave
     metrics_path: /metrics
     file_sd_configs:
       - files: [/etc/prometheus/panel-targets.yml]
         refresh_interval: 30s
     basic_auth:
-      username: monitoring
+      username: admin
       password_file: /run/secrets/remnawave_metrics_password

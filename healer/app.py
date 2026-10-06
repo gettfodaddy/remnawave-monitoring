@@ -66,7 +66,7 @@ def confirm_incident(node):
         return False, "node_exporter is not healthy"
     if not query_has_value('remnawave_container_up{node="' + node + '"}', 1):
         return False, "remnanode container is not running"
-    if not query_has_value('time() - remnawave_container_check_timestamp_seconds{node="' + node + '"} < 90', 1):
+    if not query_has_value('time() - remnawave_container_check_timestamp_seconds{node="' + node + '"} < bool 90', 1):
         return False, "container state check is stale"
     return True, "all independent checks confirm a running but unreachable node"
 

@@ -5,6 +5,7 @@ import os
 import time
 import urllib.parse
 import urllib.request
+from html import escape
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -14,8 +15,13 @@ CHAT = os.environ["TELEGRAM_CHAT_ID"]
 TZ = ZoneInfo(os.environ.get("TIMEZONE", "Europe/Moscow"))
 HOUR = int(os.environ.get("REPORT_HOUR", "9"))
 MINUTE = int(os.environ.get("REPORT_MINUTE", "0"))
+INTERVAL_HOURS = int(os.environ.get("REPORT_INTERVAL_HOURS", "3"))
 STEP = "5m"
 FILESYSTEM_EXCLUDE = 'fstype!~"tmpfs|overlay|squashfs|ramfs|devtmpfs"'
+# Restrict the digest to the nodes currently enrolled in monitoring. Values are
+# configurable so newly enrolled nodes can be added without changing code.
+REPORT_NODES = {n.strip() for n in os.environ.get("REPORT_NODES", "est-001,lat-001,ltu-001").split(",") if n.strip()}
+REPORT_PANEL_NODES = {n.strip().upper() for n in os.environ.get("REPORT_PANEL_NODES", "EST-001,LAT-001,LTU-001").split(",") if n.strip()}
 
 
 def prom_query(expression):
@@ -57,7 +63,9 @@ def build_report():
     cpu_expr = 'max_over_time((100 * (1 - avg by (node) (rate(node_cpu_seconds_total{job="node",mode="idle"}[5m]))))[24h:5m])'
     mem_expr = 'max_over_time((100 * (1 - node_memory_MemAvailable_bytes{job="node"} / node_memory_MemTotal_bytes{job="node"}))[24h:5m])'
     disk_expr = 'min by (node) (min_over_time((100 * node_filesystem_avail_bytes{job="node",' + FILESYSTEM_EXCLUDE + '} / node_filesystem_size_bytes{job="node",' + FILESYSTEM_EXCLUDE + '})[24h:5m]))'
-    uptime_expr = '100 * avg_over_time(probe_success{job="vpn_tcp"}[24h])'
+    # Aggregate all probe targets for a node before converting to a percentage.
+    # This avoids dict-overwriting when Prometheus has more than one series per node.
+    uptime_expr = '100 * avg by (node) (avg_over_time(probe_success{job="vpn_tcp"}[24h]))'
     container_expr = 'remnawave_container_up{job="node"}'
     rx = 'sum by (node) (increase(node_network_receive_bytes_total{job="node",device!~"lo|docker.*|veth.*|br-.*"}[24h]))'
     tx = 'sum by (node) (increase(node_network_transmit_bytes_total{job="node",device!~"lo|docker.*|veth.*|br-.*"}[24h]))'
@@ -73,35 +81,59 @@ def build_report():
         "rw_status": rows_by_label(rw_status, "node_uuid"),
     }
     names = {r.get("metric", {}).get("node_uuid", "unknown"): r.get("metric", {}).get("node_name", "unknown") for r in prom_query(rw_names)}
-    nodes = sorted(set(data["cpu"]) | set(data["uptime"]) | set(data["container"]))
+    # Always show every configured node, even when Prometheus currently has no
+    # samples for it; missing values are rendered as em dashes in the report.
+    nodes = sorted(REPORT_NODES)
+    panel_uuids = {uuid for uuid, name in names.items() if name.strip().upper() in REPORT_PANEL_NODES}
+    data["rw_status"] = {uuid: value for uuid, value in data["rw_status"].items() if uuid in panel_uuids}
+    data["rw_traffic"] = {uuid: value for uuid, value in data["rw_traffic"].items() if uuid in panel_uuids}
     today = datetime.now(TZ).strftime("%d.%m.%Y")
-    lines = ["📊 <b>Сводка Remnawave за последние 24 часа</b>", "Дата: " + today, ""]
+    lines = [
+        "📊 <b>ОТЧЁТ REMNAWAVE</b>",
+        "🕒 Период: последние 24 часа",
+        "📅 Дата: " + today,
+        "",
+        "<b>🖥 ТЕСТОВЫЕ НОДЫ</b>",
+    ]
     if not nodes:
-        lines.append("Метрики пока не поступили.")
+        lines.append("Метрики по выбранным нодам пока не поступили.")
     for node in nodes:
         available = data["uptime"].get(node)
         container = data["container"].get(node)
-        state = "работает" if container == 1 else ("остановлен" if container == 0 else "нет метрики")
+        state = "🟢 работает" if container == 1 else ("🔴 остановлен" if container == 0 else "⚪ нет метрики")
         traffic = data["rx"].get(node, 0) + data["tx"].get(node, 0)
+        probe_state = "🟢" if available is not None and available >= 99 else ("🟡" if available is not None and available > 0 else "🔴")
+        rows = [
+            "VPN доступность     " + pretty_percent(available),
+            "CPU пик             " + pretty_percent(data["cpu"].get(node)),
+            "RAM пик             " + pretty_percent(data["memory"].get(node)),
+            "Свободно на диске   " + pretty_percent(data["disk"].get(node)),
+            "Контейнер           " + state,
+            "Трафик хоста*       " + pretty_bytes(traffic),
+        ]
         lines.extend([
-            "<b>" + node + "</b>",
-            "• VPN TCP доступность: " + pretty_percent(available),
-            "• Пик CPU: " + pretty_percent(data["cpu"].get(node)),
-            "• Пик RAM: " + pretty_percent(data["memory"].get(node)),
-            "• Минимум свободного диска: " + pretty_percent(data["disk"].get(node)),
-            "• Контейнер remnanode сейчас: " + state,
-            "• Сетевой трафик хоста*: " + pretty_bytes(traffic),
+            probe_state + " <b>" + escape(node) + "</b>",
+            "<pre>" + escape("\n".join(rows)) + "</pre>",
             "",
         ])
     if data["rw_status"] or data["rw_traffic"]:
-        lines.extend(["<b>Метрики из Remnawave Panel</b>"])
+        panel_rows = []
         for uuid in sorted(set(data["rw_status"]) | set(data["rw_traffic"])):
-            status = "подключена" if data["rw_status"].get(uuid) == 1 else "отключена/нет метрики"
+            is_connected = data["rw_status"].get(uuid) == 1
+            status = "🟢 подключена" if is_connected else "🔴 нет связи"
             name = names.get(uuid, uuid[:8])
-            lines.append("• " + name + ": " + status + "; трафик inbound за 24 ч: " + pretty_bytes(data["rw_traffic"].get(uuid)))
-        lines.append("")
-    lines.append("* RX+TX по интерфейсам хоста за сутки; это не биллинг Remnawave.")
-    lines.append("Трафик Remnawave рассчитан из inbound upload/download counters за окно хранения Prometheus.")
+            panel_rows.append("%-10s  %-14s  %s" % (name, status, pretty_bytes(data["rw_traffic"].get(uuid))))
+        panel_table = escape("\n".join(panel_rows))
+        lines.extend([
+            "<b>📡 REMNAWAVE PANEL</b>",
+            "<pre>\n" + panel_table + "\n</pre>",
+            "<i>Колонки: узел / статус / трафик inbound.</i>",
+            "",
+        ])
+    lines.extend([
+        "<i>* Трафик хоста — RX+TX интерфейсов за сутки, не биллинг Remnawave.</i>",
+        "Трафик панели — сумма inbound upload/download counters за окно хранения Prometheus.",
+    ])
     return "\n".join(lines)
 
 
@@ -115,20 +147,20 @@ def send(text):
 
 
 def next_report_time(now):
-    due = now.replace(hour=HOUR, minute=MINUTE, second=0, microsecond=0)
-    if due <= now:
-        due += timedelta(days=1)
-    return due
+    interval_minutes = max(1, INTERVAL_HOURS) * 60
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    next_slot = ((now.hour * 60 + now.minute) // interval_minutes + 1) * interval_minutes
+    return midnight + timedelta(minutes=next_slot)
 
 
 if __name__ == "__main__":
-    print("daily digest active; timezone=" + str(TZ) + " schedule=%02d:%02d" % (HOUR, MINUTE), flush=True)
+    print("digest active; timezone=" + str(TZ) + " interval_hours=" + str(INTERVAL_HOURS), flush=True)
     while True:
         now = datetime.now(TZ)
         due = next_report_time(now)
         time.sleep(max(1, int((due - now).total_seconds())))
         try:
             send(build_report())
-            print("daily digest sent", flush=True)
+            print("digest sent", flush=True)
         except Exception as exc:
-            print("daily digest failed:", str(exc), flush=True)
+            print("digest failed:", str(exc), flush=True)

@@ -1,5 +1,5 @@
-# Remnawave Panel's METRICS_PORT (normally 3001), reachable privately from
-# the monitoring VPS. Replace with a WireGuard address where possible.
-- targets: ["10.20.0.2:3001"]
+# Public IPv4 of the Remnawave Panel VPS. Access is restricted by UFW to the
+# public IPv4 of the monitoring VPS. Replace the sample address.
+- targets: ["198.51.100.20:3001"]
   labels:
     app: "remnawave"

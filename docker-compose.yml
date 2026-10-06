@@ -132,8 +132,9 @@ services:
       TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:?set TELEGRAM_CHAT_ID in .env}
       TIMEZONE: Europe/Moscow
-      REPORT_HOUR: "9"
-      REPORT_MINUTE: "0"
+      REPORT_INTERVAL_HOURS: "3"
+      REPORT_NODES: "est-001,lat-001,ltu-001"
+      REPORT_PANEL_NODES: "EST-001,LAT-001,LTU-001"
     volumes:
       - ./secrets:/run/secrets:ro
     networks: [monitoring]

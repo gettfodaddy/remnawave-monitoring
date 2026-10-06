@@ -1,16 +1,16 @@
 # This file is only for node_exporter. Replace addresses and preserve a stable
 # node label for every server. VPN targets are in vpn-targets.yml.
-- targets: ["203.0.113.10:9100"]
+- targets: ["198.51.100.21:9100"]
   labels:
-    node: "de-01"
+    node: "est-001"
     role: "vpn-node"
 
-- targets: ["203.0.113.11:9100"]
+- targets: ["198.51.100.22:9100"]
   labels:
-    node: "nl-01"
+    node: "lat-001"
     role: "vpn-node"
 
-- targets: ["203.0.113.12:9100"]
+- targets: ["198.51.100.23:9100"]
   labels:
-    node: "fr-01"
+    node: "ltu-001"
     role: "vpn-node"
